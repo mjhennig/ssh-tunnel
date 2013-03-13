@@ -102,6 +102,8 @@ Description:
         Show usage information and exit gracefully
     restart, reload, force-reload
         Shortcuts for "$SSH_TUNNEL stop; $SSH_TUNNEL start"
+    list
+        Show the definitions of all tunnels enabled
     start
         Attempt to create each tunnel defined in the group configuration
         files. Existing tunnels will be left untouched
@@ -110,6 +112,9 @@ Description:
         known tunnels to /dev/stdout
     stop
         Shut down all active tunnels
+    test \$name
+        Test the configuration of the tunnel identified by the given
+        \$name. Also useful to acknowledge hosts
 
 END
     # Return the status determined in the beginning
@@ -128,9 +133,33 @@ ssh_tunnel_command_start() {
     ssh_tunnel_obtain_agent || exit 1
     
     # Iterate over the list of available tunnels and trigger creation
-    ssh_tunnel_list_available \
+    ssh_tunnel_list_enabled \
     | while read TUNNEL_NAME TUNNEL_OPTIONS; do
         ssh_tunnel_create "$TUNNEL_NAME" -f -Nn $TUNNEL_OPTIONS
+    done
+
+    # Always successful, even if tunnels are corrupt
+    return 0
+}
+
+# The implementation of the "test" command. It will attempt to create
+# the requested tunnel ($2) without dropping into background (except
+# if the tunnel is configured with -f)
+ssh_tunnel_command_test() {
+
+    # Standard parameter handling
+    COMMAND="$1"; shift
+    ssh_tunnel_warn "Usage: $ARGV0 $COMMAND tunnel_name" $# -gt 0
+    NAME="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Ensure there's an SSH agent running, otherwise bail out
+    ssh_tunnel_obtain_agent || exit 1
+    
+    # Iterate over the list of available tunnels and trigger creation
+    ssh_tunnel_find_enabled "$NAME" \
+    | while read TUNNEL_NAME TUNNEL_OPTIONS; do
+        ssh_tunnel_create "$TUNNEL_NAME" $TUNNEL_OPTIONS
     done
 
     # Always successful, even if tunnels are corrupt
@@ -147,7 +176,7 @@ ssh_tunnel_command_status() {
 
     # List both, available and active tunnels, but ensure their entries
     # to occur only once
-    ( ssh_tunnel_list_available && ssh_tunnel_list_active ) \
+    ( ssh_tunnel_list_enabled && ssh_tunnel_list_active ) \
     | sort -u -t' ' -k1,1 | while read TUNNEL_NAME TUNNEL_OPTIONS; do
 
         if ssh_tunnel_exists "$TUNNEL_NAME"; then
@@ -160,6 +189,18 @@ ssh_tunnel_command_status() {
         fi
 
     done
+}
+
+# The implementation of the "list" command. It will write the name and
+# definition of each tunnel enabled to STDOUT
+ssh_tunnel_command_list() {
+
+    # Standard parameter handling
+    COMMAND="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Pretty straight-forward, huh?
+    ssh_tunnel_list_enabled
 }
 
 # The implementation of the "stop" command. It attempts to shut down
@@ -369,7 +410,7 @@ ssh_tunnel_stop_agent() {
 
 # List all tunnel definitions in all available groups. Note that this
 # will prefix the tunnel name by the group name, followed by a dot.
-ssh_tunnel_list_available() {
+ssh_tunnel_list_enabled() {
 
     # This function does not expect any options at all
     ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
@@ -419,6 +460,23 @@ ssh_tunnel_list_active() {
     done
 }
 
+# List all tunnel definitions associated with the given name ($1). Note
+# that this may include more than one tunnel, or maybe none at all
+ssh_tunnel_find_enabled() {
+
+    # Standard parameter handling
+    NAME="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Determine matching tunnels
+    ssh_tunnel_list_enabled \
+    | while read TUNNEL_NAME TUNNEL_OPTIONS; do
+        if [ "x$TUNNEL_NAME" = "x$NAME" ]; then
+            echo "$TUNNEL_NAME" "$TUNNEL_OPTIONS"
+        fi
+    done
+}
+
 # ------------------------------------------------------------------------
 # Logging, assertions & stuff                                            :
 # ------------------------------------------------------------------------
@@ -443,7 +501,7 @@ ssh_tunnel_fail() {
 }
 
 # Ensure that the general resources are available
-case "$1" in force-reload|reload|start|status|stop)
+case "$1" in force-reload|reload|start|status|stop|test)
     # Attempt to create the runtime directory if it doesn't exist
     mkdir -p "$SSH_TUNNEL_RUNTIME_DIR" 2>/dev/null
     # Bail out if the runtime directory is not accessible
@@ -454,7 +512,7 @@ case "$1" in force-reload|reload|start|status|stop)
 esac
 
 # Ensure that the startup resources are available
-case "$1" in force-reload|reload|restart|start)
+case "$1" in force-reload|reload|restart|list|start|test)
     # Carp in case the tunnel list is not available
     ssh_tunnel_warn "not a directory: \$2" -d "$SSH_TUNNEL_GROUP_DIR" \
     && ssh_tunnel_warn "not readable: \$2" -r "$SSH_TUNNEL_GROUP_DIR" \
@@ -477,7 +535,7 @@ esac
 case "$1" in
 
     # Process regular commands
-    start|status)
+    list|start|status|test)
         ssh_tunnel_command_$1 "$@"
         ;;
 
