@@ -1,0 +1,504 @@
+#!/bin/sh
+# ------------------------------------------------------------------------
+# vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 textwidth=75   :
+# ------------------------------------------------------------------------
+# Copyright (c) 2013 Mathias J. Hennig                                   :
+#                                                                        :
+# All rights reserved.                                                   :
+#                                                                        :
+# Redistribution and use in source and binary forms, with or without     :
+# modification, are permitted provided that the following conditions     :
+# are met:                                                               :
+#                                                                        :
+# 1)  Redistributions of source code must retain the above copyright     :
+#     notice, this list of conditions and the following disclaimer.      :
+# 2)  Redistributions in binary form must reproduce the above copyright  :
+#     notice, this list of conditions and the following disclaimer in    :
+#     the documentation and/or other materials provided with the         :
+#     distribution.                                                      :
+#                                                                        :
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER AND CONTRIBUTORS     :
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      :
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR  :
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT   :
+# HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, :
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT       :
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,  :
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY  :
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT    :
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE  :
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.   :
+# ------------------------------------------------------------------------
+SSH_TUNNEL=`basename $0`
+
+# Configuration that differs between root and regular users
+if [ "x$USER" = "xroot" -o "x`whoami`" = "xroot" ]; then
+    # Import environment variable overrides
+    test -e "/etc/default/ssh-tunnel" && . "/etc/default/ssh-tunnel"
+    # Where to find gobal configuration files
+    : ${SSH_TUNNEL_CONFIG:="/etc/ssh/tunnel"}
+    # Where to find private SSH-keys to be used by default
+    : ${SSH_TUNNEL_KEY_DIR:="$SSH_TUNNEL_CONFIG/keys-enabled"}
+    # Where to find the list of tunnels to create
+    : ${SSH_TUNNEL_GROUP_DIR:="$SSH_TUNNEL_CONFIG/groups-enabled"}
+    # Where to store runtime data
+    : ${SSH_TUNNEL_RUNTIME_DIR:="/var/run/ssh-tunnel"}
+    # Where to store logging information
+    : ${SSH_TUNNEL_LOG:="/var/log/ssh-tunnel.log"}
+else
+    # Ensure $USER and $HOME are defined
+    : ${USER:="`whoami`"}; : ${HOME:="/home/$USER"}
+    # Where to find per-user configuration files
+    : ${SSH_TUNNEL_CONFIG:="$HOME/.ssh/tunnel"}
+    # Where to find private SSH-keys to be used by default
+    : ${SSH_TUNNEL_KEY_DIR:="$SSH_TUNNEL_CONFIG/keys.d"}
+    # Where to find the list of tunnels to create
+    : ${SSH_TUNNEL_GROUP_DIR:="$SSH_TUNNEL_CONFIG/groups.d"}
+    # Where to store runtime data
+    : ${SSH_TUNNEL_RUNTIME_DIR:="/tmp/ssh-tunnel.$USER"}
+    # Where to store logging information
+    : ${SSH_TUNNEL_LOG:="$SSH_TUNNEL_RUNTIME_DIR/tunnel.log"}
+
+fi
+
+# Where to store the SSH_AUTH_SOCK
+: ${SSH_TUNNEL_AUTH_SOCK:="$SSH_TUNNEL_RUNTIME_DIR/auth.sock"}
+# Where to store the SSH_AGENT_PID
+: ${SSH_TUNNEL_AGENT_PID_FILE:="$SSH_TUNNEL_RUNTIME_DIR/agent.pid"}
+    
+# The name of the autossh(1) executable
+: ${SSH_TUNNEL_AUTOSSH:="autossh"}
+# The name of the ssh-agent(1) executable
+: ${SSH_TUNNEL_SSH_AGENT:="ssh-agent"}
+# The name of the ssh-add(1) executable
+: ${SSH_TUNNEL_SSH_ADD:="ssh-add"}
+
+# Additional parameters for autossh(1)
+: ${SSH_TUNNEL_AUTOSSH_OPTS:="-M 0 -f -n"}
+
+# ------------------------------------------------------------------------
+# Commands the user can invoke                                           :
+# ------------------------------------------------------------------------
+
+# The implemetation of the "help" command. It will write a usage hints to
+# either STDERR (in case $1 is not a help command alias) or STDOUT
+ssh_tunnel_command_help() {
+
+    # Determine output stream and return value based on the given
+    # command, if any
+    case "$1" in
+        help|-h|-?|--help|-help|-H|"")
+            stream=/dev/stdout; status=0;;
+        *)  stream=/dev/stderr; status=1;;
+    esac
+
+    # Print the actual usage information
+    cat >$stream <<END
+Usage:  $SSH_TUNNEL [start|stop|restart|reload|status]
+        $SSH_TUNNEL status
+
+Description:
+    help, --help, -h, -H, -?
+        Show usage information and exit gracefully
+    restart, reload, force-reload
+        Shortcuts for "$SSH_TUNNEL stop; $SSH_TUNNEL start"
+    start
+        Attempt to create each tunnel defined in the group configuration
+        files. Existing tunnels will be left untouched
+    status
+        Write the name and status (active, inactive, corrupt) of all
+        known tunnels to /dev/stdout
+    stop
+        Shut down all active tunnels
+
+END
+    # Return the status determined in the beginning
+    return $status
+}
+
+# The implementation of the "start" command. It will attempt to create
+# each tunnel defined in the group configuration files
+ssh_tunnel_command_start() {
+
+    # Standard parameter handling
+    COMMAND="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Ensure there's an SSH agent running, otherwise bail out
+    ssh_tunnel_obtain_agent || exit 1
+    
+    # Iterate over the list of available tunnels and trigger creation
+    ssh_tunnel_list_available \
+    | while read TUNNEL_NAME TUNNEL_OPTIONS; do
+        ssh_tunnel_create "$TUNNEL_NAME" $TUNNEL_OPTIONS
+    done
+
+    # Always successful, even if tunnels are corrupt
+    return 0
+}
+
+# The implementation of the "status" command. It writes the name and
+# status (active, inactive, corrupt) of all known tunnels to STDOUT
+ssh_tunnel_command_status() {
+
+    # Standard parameter handling
+    COMMAND="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # List both, available and active tunnels, but ensure their entries
+    # to occur only once
+    ( ssh_tunnel_list_available && ssh_tunnel_list_active ) \
+    | sort -u -t' ' -k1,1 | while read TUNNEL_NAME TUNNEL_OPTIONS; do
+
+        if ssh_tunnel_exists "$TUNNEL_NAME"; then
+            echo "$TUNNEL_NAME active"
+        elif [ -e "`ssh_tunnel_getpidfile \"$TUNNEL_NAME\"`" ]; then
+            echo "$TUNNEL_NAME corrupt"
+        else
+            echo "$TUNNEL_NAME inactive"
+        fi
+
+    done
+}
+
+# The implementation of the "stop" command. It attempts to shut down
+# (read "kill") each tunnel associated with a PID file
+ssh_tunnel_command_stop() {
+
+    # Standard parameter handling
+    COMMAND="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Determine active tunnels by examining PID files and attempt
+    # to shut them down individually
+    ssh_tunnel_list_active \
+    | while read TUNNEL_NAME; do
+        ssh_tunnel_destroy "$TUNNEL_NAME" 
+    done
+
+    # Always successful, even if tunnels are corrupt
+    return 0
+}
+
+# ------------------------------------------------------------------------
+# Operating with a single tunnel                                         :
+# ------------------------------------------------------------------------
+
+# Create the tunnel identified by the given name ($1)
+ssh_tunnel_create() {
+
+    TUNNEL_NAME="$1"; shift
+
+    if ssh_tunnel_exists "$TUNNEL_NAME"; then
+        echo "$SSH_TUNNEL: $TUNNEL_NAME: already established" >&2
+        STATUS=1
+    else
+        PID_FILE="`ssh_tunnel_getpidfile \"$TUNNEL_NAME\"`"
+        if touch "$PID_FILE" 2>/dev/null \
+                && test -f "$PID_FILE" && rm "$PID_FILE"; then
+            echo -n "$SSH_TUNNEL: $TUNNEL_NAME: " >&2
+            AUTOSSH_PIDFILE="$PID_FILE" \
+            AUTOSSH_LOGFILE="$SSH_TUNNEL_LOG" \
+            $SSH_TUNNEL_AUTOSSH $SSH_TUNNEL_AUTOSSH_OPTS \
+            "$@" && echo "initialized" >&2
+        else
+            echo "$SSH_TUNNEL: $TUNNEL_NAME: cannot access $PID_FILE" >&2
+            STATUS=1
+        fi
+    fi
+
+    return $STATUS 
+}
+
+# Destroy the tunnel identified by the given name ($1)
+ssh_tunnel_destroy() {
+    TUNNEL_NAME="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+    STATUS=0
+    if ssh_tunnel_exists "$TUNNEL_NAME"; then
+        PID="`ssh_tunnel_getpid \"$TUNNEL_NAME\"`"
+        echo -n "$SSH_TUNNEL: shutting down \"$TUNNEL_NAME\" ... " >&2
+        kill "$PID" && echo "done" >&2
+        STATUS=$?
+    fi
+    PID_FILE="`ssh_tunnel_getpidfile \"$TUNNEL_NAME\"`"
+    rm -f "$PID_FILE"
+    return $STATUS
+}
+
+# Return success in case the tunnel identified by the given name ($1) is
+# alive and seems to be healty
+ssh_tunnel_exists() {
+    TUNNEL_NAME="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+    PID="`ssh_tunnel_getpid \"$TUNNEL_NAME\"`"
+    kill -s 0 "$PID" 2>/dev/null
+}
+
+# Print the PID of the tunnel identified by the given name ($1). Note
+# that there is neither a guarantee that the ID refers to an existing
+# process nor does anybody ensure that the ID hasn't been re-used yet
+ssh_tunnel_getpid() {
+    TUNNEL_NAME="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+    PID_FILE="`ssh_tunnel_getpidfile \"$TUNNEL_NAME\"`"
+    test -r "$PID_FILE" -a -f "$PID_FILE" && cat "$PID_FILE" | xargs echo
+}
+
+# Print the path to the PID file for the tunnel identified by the given
+# name ($1). Note that the file may not exist yet!
+ssh_tunnel_getpidfile() {
+    TUNNEL_NAME="$1"; shift
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+    echo "$SSH_TUNNEL_RUNTIME_DIR/$TUNNEL_NAME.pid"
+}
+
+# ------------------------------------------------------------------------
+# Dealing with agent(s) and keys                                         :
+# ------------------------------------------------------------------------
+
+# Restore an existing SSH agent or create a new one
+ssh_tunnel_obtain_agent() {
+
+    # Standard parameter handling
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Attempt to restore an existing agent
+    SSH_AUTH_SOCK="`readlink \"$SSH_TUNNEL_AUTH_SOCK\" 2>/dev/null`"
+    SSH_AGENT_PID="`cat \"$SSH_TUNNEL_AGENT_PID_FILE\" 2>/dev/null`"
+
+    # Create a new agent unless the restored infos don't check out
+    if [ -e $SSH_AUTH_SOCK ] \
+            && kill -0 "$SSH_AGENT_PID" 2>/dev/null; then
+        : # agent restored
+    else
+        rm -f "$SSH_TUNNEL_AUTH_SOCK"
+        rm -f "$SSH_TUNNEL_AGENT_PID_FILE"
+        ssh_tunnel_create_agent
+    fi
+
+    # Handle the result of the operation(s) above
+    if STATUS=$? && [ 0 -eq $STATUS ]; then
+        # Verify SSH_AUTH_SOCK and bail out in case of errors
+        echo "$SSH_TUNNEL: auth socket: $SSH_AUTH_SOCK" >&2
+        ssh_tunnel_fail "encountered corrupt socket!" -e "$SSH_AUTH_SOCK"
+        # Verify SSH_AGENT_PID and bailt out in case of errors
+        echo "$SSH_TUNNEL: agent pid: $SSH_AGENT_PID" >&2
+        kill -0 "$SSH_AGENT_PID" || exit 1
+    else
+        # Ensure no dead bindings are in use
+        SSH_AUTH_SOCK=
+        SSH_AGENT_PID=
+    fi
+
+    export SSH_AUTH_SOCK
+    export SSH_AGENT_PID
+
+    # Return preserved status from ssh_tunnel_(restore/create)_agent
+    return $STATUS
+}
+
+# Create a new SSH agent and assign the keys associated. This may include
+# prompting the user for a passphrase!
+ssh_tunnel_create_agent() {
+
+    # Standard parameter handling
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    SOCK_DIR="`dirname \"$SSH_TUNNEL_AUTH_SOCK\"`"
+    mkdir -p "$SOCK_DIR"
+
+    ssh_tunnel_fail \
+        "can't write $SSH_TUNNEL_AUTH_SOCK" \
+        -d "$SOCK_DIR" -a -w "$SOCK_DIR" -a -x "$SOCK_DIR"
+
+    PID_DIR="`dirname \"$SSH_TUNNEL_AGENT_PID_FILE\"`"
+    mkdir -p "$PID_DIR"
+
+    touch "$SSH_TUNNEL_AGENT_PID_FILE" 2>/dev/null
+    ssh_tunnel_fail \
+        "can't write $SSH_TUNNEL_AGENT_PID_FILE" \
+        -f "$SSH_TUNNEL_AGENT_PID_FILE" -a 0 -eq $?
+
+    if eval `ssh-agent` >/dev/null \
+            && echo "$SSH_AGENT_PID" > "$SSH_TUNNEL_AGENT_PID_FILE" \
+            && ln -sf "$SSH_AUTH_SOCK" "$SSH_TUNNEL_AUTH_SOCK"; then
+        SSH_AUTH_SOCK="$SSH_TUNNEL_AUTH_SOCK"
+    else
+        rm -f "$SSH_TUNNEL_AUTH_SOCK"
+        rm -f "$SSH_TUNNEL_AGENT_PID_FILE"
+        ssh_tunnel_fail "failed to prepare SSH agent"
+    fi
+
+    for FILE in "$SSH_TUNNEL_KEY_DIR/"*; do
+        test -f "$FILE" && ssh-add "$FILE"
+    done
+
+    export SSH_AUTH_SOCK
+    export SSH_AGENT_PID
+}
+
+# Shut down the SSH agent daemon, if any
+ssh_tunnel_stop_agent() {
+
+    # Standard parameter handling
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Attempt to restore an existing agent
+    SSH_AUTH_SOCK="`readlink \"$SSH_TUNNEL_AUTH_SOCK\" 2>/dev/null`"
+    SSH_AGENT_PID="`cat \"$SSH_TUNNEL_AGENT_PID_FILE\" 2>/dev/null`"
+
+    # Send SIGTERM if the agent PID refers to an existing process
+    if kill -0 "$SSH_AGENT_PID" 2>/dev/null; then
+        kill "$SSH_AGENT_PID"
+    fi
+
+    # Remove persistent AUTH_SOCK and AGENT_PID
+    rm -f "$SSH_TUNNEL_AUTH_SOCK"
+    rm -f "$SSH_TUNNEL_AGENT_PID_FILE"
+
+    # Always successful
+    return 0
+}
+
+# ------------------------------------------------------------------------
+# Listing of resources                                                   :
+# ------------------------------------------------------------------------
+
+# List all tunnel definitions in all available groups. Note that this
+# will prefix the tunnel name by the group name, followed by a dot.
+ssh_tunnel_list_available() {
+
+    # This function does not expect any options at all
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Bail out in case the tunnel groups are not available
+    ssh_tunnel_fail "not a directory: \$2" -d "$SSH_TUNNEL_GROUP_DIR"
+    ssh_tunnel_fail "not readable: \$2" -r "$SSH_TUNNEL_GROUP_DIR"
+    ssh_tunnel_fail "not accessible: \$2" -x "$SSH_TUNNEL_GROUP_DIR"
+
+    # Search for tunnel group definition files
+    find "$SSH_TUNNEL_GROUP_DIR" -maxdepth 1 -type f \
+    | while read FILE; do
+
+        # Carp about files not readable, but don't bail out
+        if [ ! -r "$FILE" ]; then
+            ssh_tunnel_warn "group file not readable: $FILE"
+            continue
+        fi
+
+        # The group names correspond to their respective file names
+        GROUP_NAME="`basename \"$FILE\"`"
+
+        # Filter the group file for tunnel definition lines
+        sed -e "/^\\s*\$/d;/^\\s*#.*/d" "$FILE" \
+        | while read TUNNEL_NAME TUNNEL_OPTIONS; do
+            echo "$GROUP_NAME.$TUNNEL_NAME" "$TUNNEL_OPTIONS"
+        done
+    done
+}
+
+# List the names of all tunnels with existing PID files. Note that
+# this may include dead ones, as this function does not verify anything.
+ssh_tunnel_list_active() {
+
+    # This function does not expect any options at all
+    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+
+    # Bail out in case the tunnel groups are not available
+    ssh_tunnel_fail "not a directory: \$2" -d "$SSH_TUNNEL_RUNTIME_DIR"
+    ssh_tunnel_fail "not readable: \$2" -r "$SSH_TUNNEL_RUNTIME_DIR"
+    ssh_tunnel_fail "not accessible: \$2" -x "$SSH_TUNNEL_RUNTIME_DIR"
+
+    # Determine active tunnels by examining their PID files
+    find "$SSH_TUNNEL_RUNTIME_DIR" -maxdepth 1 -type f -name '*.*.pid' \
+    | while read FILE; do
+        basename "$FILE" ".pid"
+    done
+}
+
+# ------------------------------------------------------------------------
+# Logging, assertions & stuff                                            :
+# ------------------------------------------------------------------------
+
+# Print a warning message ($1) on STDERR if either a) there are no more
+# parameters or b) evaluating them with test(1) results in an error code.
+# This can be used to carp about unmet preconditions and stuff.
+ssh_tunnel_warn() {
+    MESSAGE="$1"; shift
+    if test -z "$1" -o ! '(' "$@" ')'; then 
+        STATUS=1
+        eval echo "$SSH_TUNNEL: $MESSAGE" >&2
+    fi
+    return $STATUS
+}
+
+# Like ssh_tunnel_warn(), but will exit with an error code in case
+# applying the constraint fails (or there's no constraint at all)
+ssh_tunnel_fail() {
+    MESSAGE="$1"; shift
+    ssh_tunnel_warn "$MESSAGE" "$@" || exit $?
+}
+
+# Ensure that the general resources are available
+case "$1" in force-reload|reload|start|status|stop)
+    # Attempt to create the runtime directory if it doesn't exist
+    mkdir -p "$SSH_TUNNEL_RUNTIME_DIR" 2>/dev/null
+    # Bail out if the runtime directory is not accessible
+    ssh_tunnel_fail "not a directory: \$2" -d "$SSH_TUNNEL_RUNTIME_DIR"
+    ssh_tunnel_fail "not readable: \$2" -r "$SSH_TUNNEL_RUNTIME_DIR"
+    ssh_tunnel_fail "not accessible: \$2" -x "$SSH_TUNNEL_RUNTIME_DIR"
+    ;;
+esac
+
+# Ensure that the startup resources are available
+case "$1" in force-reload|reload|restart|start)
+    # Carp in case the tunnel list is not available
+    ssh_tunnel_warn "not a directory: \$2" -d "$SSH_TUNNEL_GROUP_DIR" \
+    && ssh_tunnel_warn "not readable: \$2" -r "$SSH_TUNNEL_GROUP_DIR" \
+    && ssh_tunnel_warn "not accessible: \$2" -x "$SSH_TUNNEL_GROUP_DIR"
+    # Carp in case the keys directory is not accessible
+    ssh_tunnel_warn "not a directory: \$2" -d "$SSH_TUNNEL_KEY_DIR" \
+    && ssh_tunnel_warn "not readable: \$2" -r "$SSH_TUNNEL_KEY_DIR" \
+    && ssh_tunnel_warn "not accessible: \$2" -x "$SSH_TUNNEL_KEY_DIR"
+    # Bail out if no logging information could be written
+    touch "$SSH_TUNNEL_LOG" 2>/dev/null
+    ssh_tunnel_fail "not a file: \$2" -f "$SSH_TUNNEL_LOG"
+    ssh_tunnel_fail "not writable: \$2" -w "$SSH_TUNNEL_LOG"
+esac
+
+# ------------------------------------------------------------------------
+# Main                                                                   :
+# ------------------------------------------------------------------------
+
+# Parameter resp. command handling
+case "$1" in
+
+    # Process regular commands
+    start|status)
+        ssh_tunnel_command_$1 "$@"
+        ;;
+
+    stop)
+        ssh_tunnel_command_stop "$@"
+        ssh_tunnel_stop_agent
+        ;;
+
+    # Process any alias of "restart"
+    force-reload|reload|restart)
+        ssh_tunnel_obtain_agent || exit 1
+        ssh_tunnel_command_stop "$@"
+        ssh_tunnel_command_start "$@"
+        ;;
+
+    # Show usage hint
+    help|-h|-?|--help|-help|-H|"")
+        ssh_tunnel_command_help "$@"
+        ;;
+
+    # Bail out in case of unknown commands
+    *)  ssh_tunnel_warn "unknown command: $* (try --help)"
+        exit 1
+        ;;
+esac
+
