@@ -330,7 +330,9 @@ ssh_tunnel_create_agent() {
         ssh_tunnel_fail "failed to prepare SSH agent"
     fi
 
-    for FILE in "$SSH_TUNNEL_KEY_DIR/"*; do
+    # Search for tunnel group definition files
+    find -L "$SSH_TUNNEL_KEY_DIR" -maxdepth 1 -type f \
+    | while read FILE; do
         test -f "$FILE" && ssh-add "$FILE"
     done
 
@@ -378,7 +380,7 @@ ssh_tunnel_list_available() {
     ssh_tunnel_fail "not accessible: \$2" -x "$SSH_TUNNEL_GROUP_DIR"
 
     # Search for tunnel group definition files
-    find "$SSH_TUNNEL_GROUP_DIR" -maxdepth 1 -type f \
+    find -L "$SSH_TUNNEL_GROUP_DIR" -maxdepth 1 -type f \
     | while read FILE; do
 
         # Carp about files not readable, but don't bail out
