@@ -1,7 +1,7 @@
 SSH Tunnel Utility Version 0.0.1
-================================
+--------------------------------
 
-The ssh-tunnel utility allows the user to maintain persistent SSH-tunnel
+The `ssh-tunnel` utility allows the user to maintain persistent SSH-tunnel
 configurations. Furthermore, it automates startup, restart and shut-down
 of these tunnels in bulk, whilst also providing a simple status overview.
 
@@ -9,7 +9,7 @@ One of the tool's main features is that it differs between `root`
 and regular users. Thus, both can maintain their own configuration but use
 the exact same mechanisms.
 
-Note that, unlike similar software, ssh-tunnel does not ship with a GUI.
+Note that, unlike similar software, `ssh-tunnel` does not ship with a GUI.
 The script's primary purpose is to be used by administrators and CLI
 enthusiasts - within `initrd`-based systems (or similar), for example,
 in order to establish SSH tunnels during the system boot. Or explicitely,
