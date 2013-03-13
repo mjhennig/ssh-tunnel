@@ -151,11 +151,12 @@ ssh_tunnel_command_status() {
     | sort -u -t' ' -k1,1 | while read TUNNEL_NAME TUNNEL_OPTIONS; do
 
         if ssh_tunnel_exists "$TUNNEL_NAME"; then
-            echo "$TUNNEL_NAME active"
+            PID="`ssh_tunnel_getpid \"$TUNNEL_NAME\"`"
+            echo "$TUNNEL_NAME active $PID"
         elif [ -e "`ssh_tunnel_getpidfile \"$TUNNEL_NAME\"`" ]; then
-            echo "$TUNNEL_NAME corrupt"
+            echo "$TUNNEL_NAME corrupt -"
         else
-            echo "$TUNNEL_NAME inactive"
+            echo "$TUNNEL_NAME inactive -"
         fi
 
     done
@@ -330,7 +331,7 @@ ssh_tunnel_create_agent() {
     fi
 
     # Search & add private SSH key files
-    find -L "$SSH_TUNNEL_KEY_DIR" -maxdepth 1 -type f \
+    find -L "$SSH_TUNNEL_KEY_DIR" -maxdepth 1 -type f -not -name '.*' \
     | while read FILE; do
         test -f "$FILE" && ssh-add "$FILE"
     done
@@ -379,7 +380,7 @@ ssh_tunnel_list_available() {
     ssh_tunnel_fail "not accessible: \$2" -x "$SSH_TUNNEL_GROUP_DIR"
 
     # Search for tunnel group definition files
-    find -L "$SSH_TUNNEL_GROUP_DIR" -maxdepth 1 -type f \
+    find -L "$SSH_TUNNEL_GROUP_DIR" -maxdepth 1 -type f -not -name '.*' \
     | while read FILE; do
 
         # Carp about files not readable, but don't bail out
