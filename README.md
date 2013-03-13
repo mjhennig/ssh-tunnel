@@ -1,4 +1,4 @@
-SSH Tunnel Utility Version 0.0.1
+SSH Tunnel Utility Version 0.0.2
 --------------------------------
 
 The `ssh-tunnel` utility allows the user to maintain persistent SSH-tunnel
