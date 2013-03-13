@@ -316,16 +316,17 @@ ssh_tunnel_obtain_agent() {
         rm -f "$SSH_TUNNEL_AUTH_SOCK"
         rm -f "$SSH_TUNNEL_AGENT_PID_FILE"
         ssh_tunnel_create_agent
+        echo "$SSH_TUNNEL: auth socket: $SSH_AUTH_SOCK" >&2
+        echo "$SSH_TUNNEL: agent pid: $SSH_AGENT_PID" >&2
     fi
 
     # Handle the result of the operation(s) above
     if STATUS=$? && [ 0 -eq $STATUS ]; then
         # Verify SSH_AUTH_SOCK and bail out in case of errors
-        echo "$SSH_TUNNEL: auth socket: $SSH_AUTH_SOCK" >&2
         ssh_tunnel_fail "encountered corrupt socket!" -e "$SSH_AUTH_SOCK"
         # Verify SSH_AGENT_PID and bailt out in case of errors
-        echo "$SSH_TUNNEL: agent pid: $SSH_AGENT_PID" >&2
-        kill -0 "$SSH_AGENT_PID" || exit 1
+        kill -0 "$SSH_AGENT_PID"
+        ssh_tunnel_fail "encountered invalid agent id!" $? -eq 0
     else
         # Ensure no dead bindings are in use
         SSH_AUTH_SOCK=
