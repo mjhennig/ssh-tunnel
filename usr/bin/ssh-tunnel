@@ -329,7 +329,7 @@ ssh_tunnel_create_agent() {
         ssh_tunnel_fail "failed to prepare SSH agent"
     fi
 
-    # Search for tunnel group definition files
+    # Search & add private SSH key files
     find -L "$SSH_TUNNEL_KEY_DIR" -maxdepth 1 -type f \
     | while read FILE; do
         test -f "$FILE" && ssh-add "$FILE"
