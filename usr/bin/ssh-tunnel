@@ -200,7 +200,8 @@ ssh_tunnel_create() {
             echo "$SSH_TUNNEL: $TUNNEL_NAME: initializing ..." >&2
             ( AUTOSSH_PIDFILE="$PID_FILE" \
             AUTOSSH_LOGFILE="$SSH_TUNNEL_LOG" \
-            $SSH_TUNNEL_AUTOSSH $SSH_TUNNEL_AUTOSSH_OPTS "$@" ) &
+            $SSH_TUNNEL_AUTOSSH $SSH_TUNNEL_AUTOSSH_OPTS "$@" \
+            3>&1 1>&2 2>&3 | tee -a "$SSH_TUNNEL_LOG" >&2 ) &
         else
             echo "$SSH_TUNNEL: $TUNNEL_NAME: cannot access $PID_FILE" >&2
             STATUS=1
