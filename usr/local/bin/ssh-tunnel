@@ -74,7 +74,7 @@ fi
 : ${SSH_TUNNEL_SSH_ADD:="ssh-add"}
 
 # Additional parameters for autossh(1)
-: ${SSH_TUNNEL_AUTOSSH_OPTS:="-n"}
+: ${SSH_TUNNEL_AUTOSSH_OPTS:=""}
 
 # ------------------------------------------------------------------------
 # Commands the user can invoke                                           :
@@ -130,7 +130,7 @@ ssh_tunnel_command_start() {
     # Iterate over the list of available tunnels and trigger creation
     ssh_tunnel_list_available \
     | while read TUNNEL_NAME TUNNEL_OPTIONS; do
-        ssh_tunnel_create "$TUNNEL_NAME" $TUNNEL_OPTIONS
+        ssh_tunnel_create "$TUNNEL_NAME" -f -Nn $TUNNEL_OPTIONS
     done
 
     # Always successful, even if tunnels are corrupt
@@ -198,10 +198,9 @@ ssh_tunnel_create() {
         if touch "$PID_FILE" 2>/dev/null \
                 && test -f "$PID_FILE" && rm "$PID_FILE"; then
             echo "$SSH_TUNNEL: $TUNNEL_NAME: initializing ..." >&2
-            ( AUTOSSH_PIDFILE="$PID_FILE" \
+            AUTOSSH_PIDFILE="$PID_FILE" \
             AUTOSSH_LOGFILE="$SSH_TUNNEL_LOG" \
-            $SSH_TUNNEL_AUTOSSH $SSH_TUNNEL_AUTOSSH_OPTS "$@" \
-            3>&1 1>&2 2>&3 | tee -a "$SSH_TUNNEL_LOG" >&2 ) &
+            "$SSH_TUNNEL_AUTOSSH" $SSH_TUNNEL_AUTOSSH_OPTS "$@"
         else
             echo "$SSH_TUNNEL: $TUNNEL_NAME: cannot access $PID_FILE" >&2
             STATUS=1

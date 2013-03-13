@@ -47,7 +47,7 @@ fi
 : ${SSH_TUNNEL_SSH_ADD:="ssh-add"}
 
 # Additional parameters for autossh(1)
-: ${SSH_TUNNEL_AUTOSSH_OPTS:="-n"}
+: ${SSH_TUNNEL_AUTOSSH_OPTS:=""}
 
 # ------------------------------------------------------------------------
 # Specific to autossh(1): The options below are specific to the SSH      :
