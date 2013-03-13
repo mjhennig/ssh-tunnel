@@ -499,7 +499,7 @@ case "$1" in
         ;;
 
     # Bail out in case of unknown commands
-    *)  ssh_tunnel_warn "unknown command: $* (try --help)"
+    *)  ssh_tunnel_warn "unknown command: $*"
         exit 1
         ;;
 esac
