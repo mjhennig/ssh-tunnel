@@ -17,5 +17,5 @@
 # Description:          The ssh-tunnel init script creates an SSH tunnel
 #                       according to the configuration in /etc/ssh/tunnel/
 ### END INIT INFO
-exec ssh-tunnel "$@"
+exec /usr/local/bin/ssh-tunnel "$@"
 
