@@ -1,0 +1,9 @@
+# Any hidden files unless tracked explicitely
+.*
+
+# Any archived and compressed stuff
+*.bz2
+*.gz
+*.tar
+*.zip
+
