@@ -149,17 +149,17 @@ ssh_tunnel_command_test() {
 
     # Standard parameter handling
     COMMAND="$1"; shift
-    ssh_tunnel_warn "Usage: $ARGV0 $COMMAND tunnel_name" $# -gt 0
-    NAME="$1"; shift
-    ssh_tunnel_warn "unrecognized parameter: $*" $# -eq 0
+    ssh_tunnel_fail "Usage: $ARGV0 $COMMAND tunnel_name" $# -gt 0
 
     # Ensure there's an SSH agent running, otherwise bail out
     ssh_tunnel_obtain_agent || exit 1
-    
-    # Iterate over the list of available tunnels and trigger creation
-    ssh_tunnel_find_enabled "$NAME" \
-    | while read TUNNEL_NAME TUNNEL_OPTIONS; do
-        ssh_tunnel_create "$TUNNEL_NAME" $TUNNEL_OPTIONS
+
+    for NAME in "$@"; do
+        # Iterate over the list of available tunnels and trigger creation
+        ssh_tunnel_find_enabled "$NAME" \
+        | while read TUNNEL_NAME TUNNEL_OPTIONS; do
+            ssh_tunnel_create "$TUNNEL_NAME" $TUNNEL_OPTIONS
+        done
     done
 
     # Always successful, even if tunnels are corrupt
