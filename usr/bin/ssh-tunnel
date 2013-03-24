@@ -34,7 +34,7 @@ SSH_TUNNEL=`basename $0`
 # Configuration that differs between root and regular users
 if [ "x$USER" = "xroot" -o "x`whoami`" = "xroot" ]; then
     # Import environment variable overrides
-    test -e "/etc/default/ssh-tunnel" && . "/etc/default/ssh-tunnel"
+    test -e "/etc/ssh/tunnel/config" && . "/etc/ssh/tunnel/config"
     # Where to find gobal configuration files
     : ${SSH_TUNNEL_CONFIG:="/etc/ssh/tunnel"}
     # Where to find private SSH-keys to be used by default
