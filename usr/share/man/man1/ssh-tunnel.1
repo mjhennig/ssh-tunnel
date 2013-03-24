@@ -1,0 +1,143 @@
+.TH SSH-TUNNEL 1 "March 2013" "Matze's Toolbox" "System Utilities"
+
+.SH NAME
+ssh-tunnel \- automagic ssh-tunnel management
+
+.SH SYNOPSIS
+.nf
+.RB "ssh-tunnel {start|stop|restart|status}"
+.RB "ssh-tunnel --help"
+.fi
+
+.SH DESCRIPTION
+.RB "The " "ssh-tunnel" "(1) utility provides an easy way to maintain "
+.RB "persistent SSH-tunnel configurations. Furthermore, it can be used to "
+.RB "automate startup, restart and shut-down of these tunnels in bulk."
+
+.SH OPTIONS
+.TP
+.BR "\-h" ", " "\-\-help" ", " "\-?" ", " "\-help"
+.RB "Print usage information and exit gracefully."
+
+.SH COMMANDS
+.TP
+.BR "restart" ", " "reload" ", " "force-reload"
+.RB "Invoke " "stop" " followed by " "start" "."
+.TP
+.BR "list"
+.RB "List the definitions of all tunnels in any enabled group file."
+.TP
+.BR "start"
+.RB "Attempt to establish each tunnel defined in any of the enabled tunnel "
+.RB "group definition files. Existing tunnels will be left untouched."
+.TP
+.BR "status"
+.RB "Write the name, status (active, inactive, corrupt) and PID (if any) of "
+.RB "all known tunnels to /dev/stdout."
+.TP
+.BR "stop"
+.RB "Shut down all active tunnels."
+.TP
+.BR "test" " $name"
+.RB "Test the configuration of the tunnel identified by the given $name. "
+.RB "Useful for debugging and to acknowledge hosts."
+
+.SH EXAMPLES
+.RB "Below please find some basic examples of how to configure and use the "
+.BR "ssh-tunnel" "(1) utility. More examples and detailled explanations can "
+.RI "be found at " "https://github.com/mjhennig/ssh-tunnel/wiki" "."
+
+.nf
+# Setup some global tunnels
+$ echo "bar -R 2222:localhost:22 user@example.com" > foo
+$ echo "baz -L 3333:remote.example.com:22 user@example.com" >> foo
+$ sudo cp foo /etc/ssh/tunnel/groups-available/foo
+$ sudo ln -s ../groups-available/foo /etc/ssh/tunnel/groups-enabled/foo
+
+# Attempt to establish all configured tunnels
+$ sudo ssh-tunnel start
+
+# Check the status of all enabled tunnels / tunnel groups
+$ sudo ssh-tunnel status
+foo.bar active 12434
+foo.baz active 12435
+
+# Configure connections to remote.example.com to use the foo.baz tunnel
+$ cat >> .ssh/config <<END
+Host remote.example.com
+    Hostname localhost
+    Port 3333
+    StrictHostKeyChecking no
+END
+
+# Connect to remote.example.com via foo.baz
+$ ssh remote.example.com
+.fi
+
+.SH ENVIRONMENT VARIABLES
+.TP
+.BR "SSH_TUNNEL_AGENT_PID_FILE"
+.RB "The path to the file where the process-id of the " ssh-agent "(1) shall "
+.RB "be written to or read from."
+.RI "Defaults to " "$SSH_TUNNEL_RUNTIME_DIR/agent.pid" "."
+.TP
+.BR "SSH_TUNNEL_AUTH_SOCK"
+.RB "A location to link the authenication socket of the " ssh-agent "(1)."
+.RI "Defaults to " "$SSH_TUNNEL_RUNTIME_DIR/auth.sock" "."
+.TP
+.BR "SSH_TUNNEL_AUTOSSH"
+.RB "The path to or name of the " autossh "(1) executable."
+.RI "Defaults to " "autossh" "."
+.TP
+.BR "SSH_TUNNEL_AUTOSSH_OPTS"
+.RB "Additional parameters for each invocation of " autossh "(1)."
+.TP
+.BR "SSH_TUNNEL_CONFIG"
+.RB "The directory that contains the configuration files.
+.RI "Defaults to " "/etc/ssh/tunnel" " for the system administrator (root), "
+.RI "and " "$HOME/.ssh/tunnel" " for regular users."
+.TP
+.BR "SSH_TUNNEL_GROUP_DIR"
+.RB "THe directory that contains the tunnel-group definition files, if any."
+.RI "Defaults to " "$SSH_TUNNEL_CONFIG/groups-enabled" "."
+.TP
+.BR "SSH_TUNNEL_KEY_DIR"
+.RB "The directory that contains the private SSH-keys that are to be used "
+.RB "in conjunction with " ssh-add "(1), if any."
+.RI "Defaults to " "$SSH_TUNNEL_CONFIG/keys-enabled" "."
+.TP
+.BR "SSH_TUNNEL_LOG"
+.RB "Where to protocol logging and debug information."
+.RI "Defaults to " "/var/log/ssh-tunnel.log" " for the system administrator, "
+.RI "and " "$SSH_TUNNEL_RUNTIME_DIR/tunnel.log" " for regular users."
+.TP
+.BR "SSH_TUNNEL_RUNTIME_DIR"
+.RB "The directory used to store runtime data (like PID-files)."
+.RI "Defaults to " "/var/run/ssh-tunnel" " for the system administrator, "
+.RI "and " "/tmp/ssh-tunnel.$USER" " for regular users."
+.TP
+.BR "SSH_TUNNEL_SSH_ADD"
+.RB "The path to or name of the " ssh-add "(1) executable."
+.RI "Defaults to " "ssh-add" "."
+.TP
+.BR "SSH_TUNNEL_SSH_AGENT"
+.RB "The path to or name of the " ssh-agent "(1) executable."
+.RI "Defaults to " "ssh-agent" "."
+
+.SH BUGS
+.RB "Probably infinite. Plase refer to the project's issue tracker at "
+.IR https://github.com/mjhennig/ssh-tunnel/issues " for more information."
+
+.SH SEE ALSO
+.BR autossh "(1), " ssh "(1), " ssh-add "(1), " ssh-agent "(1), "
+.BR ssh-keygen "(1), " ssh_config "(5)"
+
+.SH AUTHORS
+.RB "Mathias J. Hennig wrote the " ssh-tunnel "(1) utility and this manual "
+.RB "page."
+
+.RB "Anyway, all the credit goes to the authors and maintainers of "
+.RB "the underlying software; e.g. " ssh " (Tatu Ylonen), " OpenSSH " (Aaron "
+.RB "Campbell, Bob Beck, Markus Friedl, Niels Provos, Theo de Raadt, Dug "
+.RB "Song) and " autossh " (Carson Harding) - to name just a few."
+
