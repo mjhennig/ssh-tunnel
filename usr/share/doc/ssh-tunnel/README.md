@@ -23,8 +23,8 @@ utility:
 - **autossh**:                         http://www.harding.motd.ca/autossh/
 - **OpenSSH**:                                     http://www.openssh.org/
 
-The `/usr/local/bin/ssh-tunnel` script should work for most POSIX or UNIX-
-like operating systems that fulfill the aforementioned requirements.
+The `/usr/bin/ssh-tunnel` script should work for most POSIX- and UNIX-like
+operating systems that fulfill the aforementioned requirements.
 
 The `/etc/init.d/ssh-tunnel` file, however, is a _Linux Standard Base_
 _init-script_ that processes the the SSH-tunnel group definitions in the
@@ -86,7 +86,7 @@ one can still automate the tunnel setup using `cron(8)`. Simply edit the
 personal crontab (type `crontab -e`) and append the following lines:
 
     # m h dom mon dow command
-    * * * * * /usr/local/bin/ssh-tunnel start >/dev/null
+    * * * * * /usr/bin/ssh-tunnel start >/dev/null
 
 The above example also allows users without `root` access to automate
 their setup.
