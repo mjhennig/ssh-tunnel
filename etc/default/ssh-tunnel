@@ -31,7 +31,6 @@ else
     : ${SSH_TUNNEL_RUNTIME_DIR:="/tmp/ssh-tunnel.$USER"}
     # Where to store logging information
     : ${SSH_TUNNEL_LOG:="$SSH_TUNNEL_RUNTIME_DIR/tunnel.log"}
-
 fi
 
 # Where to store the SSH_AUTH_SOCK
