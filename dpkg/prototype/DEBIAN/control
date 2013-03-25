@@ -1,0 +1,9 @@
+Package: ssh-tunnel
+Version:
+Section: admin
+Priority: optional
+Architecture: all
+Depends: coreutils, autossh, openssh-client
+Maintainer:
+Description: Automagic SSH-Tunnels
+
